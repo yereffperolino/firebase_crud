@@ -24,34 +24,39 @@ class RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
+  void showMessage(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
+    );
+  }
+
   Future<void> handleRegister() async {
     if (emailCtrl.text.isEmpty || passwordCtrl.text.isEmpty) return;
 
     setState(() => loading = true);
 
-    final User? user = await auth.registerWithEmail(
-      emailCtrl.text.trim(),
-      passwordCtrl.text.trim(),
-    );
+    try {
+      final User? user = await auth.registerWithEmail(
+        emailCtrl.text.trim(),
+        passwordCtrl.text.trim(),
+      );
 
-    setState(() => loading = false);
-
-    if (user != null) {
-      // Send verification email
-      if (!user.emailVerified) {
+      if (user != null) {
         await user.sendEmailVerification();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Verification email sent. Please check your inbox."),
-            ),
-          );
-        }
-      }
 
-      if (mounted) {
-        Navigator.pop(context); // Return to Login
+        // createUserWithEmailAndPassword signs the new user in, which would
+        // push them into HomePage before they confirm. Sign back out so they
+        // land on the login screen instead.
+        await auth.signOut();
+
+        showMessage("Verification email sent. Please check your inbox.");
+        if (mounted) Navigator.pop(context);
       }
+    } on FirebaseAuthException catch (e) {
+      showMessage(e.message ?? "Registration failed. Please try again.");
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
 
