@@ -36,7 +36,14 @@ class MyApp extends StatelessWidget {
             );
           }
           if (snapshot.hasData) {
-            return HomePage();
+            final user = snapshot.data!;
+            // Google accounts are verified by the provider; only email/password
+            // sign-ups must confirm their address before reaching the app.
+            final usesPassword = user.providerData
+                .any((info) => info.providerId == 'password');
+            if (!usesPassword || user.emailVerified) {
+              return const HomePage();
+            }
           }
           return const LoginPage();
         },
