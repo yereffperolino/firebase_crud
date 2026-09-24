@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
@@ -54,66 +55,129 @@ class _HomePageState extends State<HomePage> {
   void openAddDialog(BuildContext context) {
     nameCtrl.clear();
     qtyCtrl.clear();
+
+    File? selectedImageFile;
+    String? selectedImageUrl;
+    bool isUploading = false;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Add Item"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: InputDecoration(
-                labelText: "Name",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Add Item"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(
+                    labelText: "Name",
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: qtyCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: "Quantity",
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // IMAGE PREVIEW IF PICKED
+                if (selectedImageFile != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      selectedImageFile!,
+                      width: 120,
+                      height: 120,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+
+                // UPLOAD BUTTON / SPINNER
+                if (isUploading)
+                  const CircularProgressIndicator()
+                else
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.upload_file),
+                    label: Text(
+                      selectedImageFile == null
+                          ? "Upload Image"
+                          : "Change Image",
+                    ),
+                    onPressed: () async {
+                      setDialogState(() => isUploading = true);
+                      final picked = await service.pickImageForAddItem();
+                      if (picked != null) {
+                        setDialogState(() {
+                          selectedImageFile = picked.file;
+                          selectedImageUrl = picked.url;
+                          isUploading = false;
+                        });
+                      } else {
+                        setDialogState(() => isUploading = false);
+                      }
+                    },
+                  ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: qtyCtrl,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: "Quantity",
-                border: OutlineInputBorder(
+          ),
+          actions: [
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
+              onPressed: isUploading
+                  ? null
+                  : () async {
+                      if (nameCtrl.text.isNotEmpty &&
+                          qtyCtrl.text.isNotEmpty) {
+                        final quantity = int.tryParse(qtyCtrl.text) ?? 0;
+                        if (selectedImageUrl != null &&
+                            selectedImageUrl!.isNotEmpty) {
+                          await service.addItemWithImage(
+                            nameCtrl.text,
+                            quantity,
+                            selectedImageUrl,
+                          );
+                        } else {
+                          await service.addItem(nameCtrl.text, quantity);
+                        }
+                      }
+                      if (context.mounted) Navigator.pop(context);
+                    },
+              child: const Text("Add", style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            child: const Text("Cancel"),
-            onPressed: () => Navigator.pop(context),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            onPressed: () {
-              if (nameCtrl.text.isNotEmpty && qtyCtrl.text.isNotEmpty) {
-                service.addItem(
-                  nameCtrl.text,
-                  int.tryParse(qtyCtrl.text) ?? 0,
-                );
-              }
-              Navigator.pop(context);
-            },
-            child: const Text("Add", style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }
 
   void openEditDialog(BuildContext context, DocumentSnapshot item) {
-    nameCtrl.text = item['name'] ?? '';
-    qtyCtrl.text = item['quantity']?.toString() ?? '';
+    // DocumentSnapshot's [] operator throws StateError on a missing field,
+    // so read through the raw map instead.
+    final data = item.data() as Map<String, dynamic>?;
+    nameCtrl.text = data?['name']?.toString() ?? '';
+    qtyCtrl.text = data?['quantity']?.toString() ?? '';
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -211,9 +275,11 @@ class _HomePageState extends State<HomePage> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
+
           final docs = snapshot.data!.docs.where((item) {
             return !showFavorites || isFavorite(item);
           }).toList();
+
           if (docs.isEmpty) {
             return Center(
               child: Text(
@@ -222,12 +288,18 @@ class _HomePageState extends State<HomePage> {
               ),
             );
           }
+
           return ListView.builder(
             padding: const EdgeInsets.all(8),
             itemCount: docs.length,
             itemBuilder: (context, index) {
               var item = docs[index];
+              final data = item.data() as Map<String, dynamic>?;
               final favorite = isFavorite(item);
+              final imageUrl = data != null && data.containsKey('imageUrl')
+                  ? data['imageUrl'] as String?
+                  : null;
+
               return Card(
                 elevation: 3,
                 shape: RoundedRectangleBorder(
@@ -239,15 +311,30 @@ class _HomePageState extends State<HomePage> {
                     horizontal: 16,
                     vertical: 8,
                   ),
+                  // SHOW IMAGE THUMBNAIL IF AVAILABLE
+                  leading: (imageUrl != null && imageUrl.isNotEmpty)
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            imageUrl,
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(Icons.image_not_supported,
+                                    size: 40, color: Colors.grey),
+                          ),
+                        )
+                      : null,
                   title: Text(
-                    item['name'],
+                    data?['name'] ?? '',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   subtitle: Text(
-                    "Quantity: ${item['quantity']}",
+                    "Quantity: ${data?['quantity'] ?? 0}",
                     style: const TextStyle(fontSize: 14, color: Colors.grey),
                   ),
                   trailing: Row(
