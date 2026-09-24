@@ -25,52 +25,49 @@ class LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  void showMessage(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
+    );
+  }
+
   Future<void> handleEmailLogin() async {
     if (emailCtrl.text.isEmpty || passwordCtrl.text.isEmpty) return;
 
     setState(() => loading = true);
 
-    final User? user = await auth.signInWithEmail(
-      emailCtrl.text.trim(),
-      passwordCtrl.text.trim(),
-    );
+    try {
+      final User? user = await auth.signInWithEmail(
+        emailCtrl.text.trim(),
+        passwordCtrl.text.trim(),
+      );
 
-    setState(() => loading = false);
-
-    if (user != null) {
-      if (!user.emailVerified) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Please verify your email before logging in."),
-            ),
-          );
-        }
+      // Sign-in already succeeded here, so the auth stream would drop an
+      // unverified user straight into HomePage. Sign back out to enforce it.
+      if (user != null && !user.emailVerified) {
+        await auth.signOut();
+        showMessage("Please verify your email before logging in.");
       }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Login failed. Please check your credentials."),
-          ),
-        );
-      }
+    } on FirebaseAuthException catch (e) {
+      showMessage(e.message ?? "Login failed. Please check your credentials.");
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
 
   Future<void> handleGoogleLogin() async {
     setState(() => loading = true);
 
-    final User? user = await auth.signInWithGoogle();
-
-    setState(() => loading = false);
-
-    if (user == null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Google Sign-In failed or was cancelled."),
-        ),
-      );
+    try {
+      final User? user = await auth.signInWithGoogle();
+      if (user == null) {
+        showMessage("Google Sign-In failed or was cancelled.");
+      }
+    } on FirebaseAuthException catch (e) {
+      showMessage(e.message ?? "Google Sign-In failed.");
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
 
